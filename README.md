@@ -85,7 +85,7 @@ The primary way to use the tool is via the `main.py` script.
 **General Command Structure:**
 
 ```bash
-python main.py --query "Go to Google and type 'Hello World' into the search bar"
+python main.py --mode agent --query "Go to Google and type 'Hello World' into the search bar"
 ```
 
 **Available Environments:**
@@ -100,13 +100,13 @@ You can specify a particular environment with the ```--env <environment>``` flag
 Runs the agent using a Chrome browser instance controlled locally by Playwright.
 
 ```bash
-python main.py --query="Go to Google and type 'Hello World' into the search bar" --env="playwright"
+python main.py --mode agent --query="Go to Google and type 'Hello World' into the search bar" --env="playwright"
 ```
 
 You can also specify an initial URL for the Playwright environment:
 
 ```bash
-python main.py --query="Go to Google and type 'Hello World' into the search bar" --env="playwright" --initial_url="https://www.google.com/search?q=latest+AI+news"
+python main.py --mode agent --query="Go to Google and type 'Hello World' into the search bar" --env="playwright" --initial_url="https://www.google.com/search?q=latest+AI+news"
 ```
 
 **Browserbase**
@@ -114,8 +114,24 @@ python main.py --query="Go to Google and type 'Hello World' into the search bar"
 Runs the agent using Browserbase as the browser backend. Ensure the proper Browserbase environment variables are set:`BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID`.
 
 ```bash
-python main.py --query="Go to Google and type 'Hello World' into the search bar" --env="browserbase"
+python main.py --mode agent --query="Go to Google and type 'Hello World' into the search bar" --env="browserbase"
 ```
+
+### 4. Collect Early Experience Data (New)
+
+You can collect task-agnostic interaction trajectories for pretraining a behavior prior.
+
+```bash
+python main.py --mode collect \
+	--env playwright \
+	--initial_url "https://www.google.com" \
+	--collect_output_dir data/early_experience \
+	--collect_episodes 2 \
+	--collect_max_steps 20 \
+	--collect_whitelist_domains "google.com,wikipedia.org"
+```
+
+Artifacts are written under `data/early_experience/episodes/<uuid>/`, including per-step PNG screenshots and an `episode.json` index with metadata and actions.
 
 ## Agent CLI
 
@@ -129,6 +145,8 @@ The `main.py` script is the command-line interface (CLI) for running the browser
 | `--env` | The computer use environment to use. Must be one of the following: `playwright`, or `browserbase` | No | N/A | All |
 | `--initial_url` | The initial URL to load when the browser starts. | No | https://www.google.com | All |
 | `--highlight_mouse` | If specified, the agent will attempt to highlight the mouse cursor's position in the screenshots. This is useful for visual debugging. | No | False (not highlighted) | `playwright` |
+| `--use_behavior_prior` | Enable a simple behavior prior to validate/adjust actions before execution. | No | False | `agent` |
+| `--behavior_prior_ckpt` | Path to the behavior prior checkpoint JSON. | No | `checkpoints/behavior_prior.json` | `agent` |
 
 ### Environment Variables
 
@@ -137,3 +155,23 @@ The `main.py` script is the command-line interface (CLI) for running the browser
 | GEMINI_API_KEY | Your API key for the Gemini model. | Yes |
 | BROWSERBASE_API_KEY | Your API key for Browserbase. | Yes (when using the browserbase environment) |
 | BROWSERBASE_PROJECT_ID | Your Project ID for Browserbase. | Yes (when using the browserbase environment) |
+
+### Train and Use the Behavior Prior (New)
+
+Train a lightweight behavior prior from collected episodes (no heavy ML dependencies required):
+
+```bash
+python train/train_behavior_prior.py \
+	--episodes_dir data/early_experience \
+	--screen_w 1440 --screen_h 900 \
+	--out checkpoints/behavior_prior.json
+```
+
+Run the agent with the prior enabled:
+
+```bash
+python main.py --mode agent --env playwright \
+	--query "Open Google and search 'Hello World'" \
+	--use_behavior_prior \
+	--behavior_prior_ckpt checkpoints/behavior_prior.json
+```

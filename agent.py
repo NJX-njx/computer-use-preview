@@ -29,6 +29,7 @@ from rich.console import Console
 from rich.table import Table
 
 from computers import EnvState, Computer
+from models.behavior_prior import BehaviorPrior
 
 MAX_RECENT_TURN_WITH_SCREENSHOTS = 3
 PREDEFINED_COMPUTER_USE_FUNCTIONS = [
@@ -67,11 +68,15 @@ class BrowserAgent:
         query: str,
         model_name: str,
         verbose: bool = True,
+        use_behavior_prior: bool = False,
+        behavior_prior_path: Optional[str] = None,
     ):
         self._browser_computer = browser_computer
         self._query = query
         self._model_name = model_name
         self._verbose = verbose
+        self._use_behavior_prior = use_behavior_prior
+        self._behavior_prior: Optional[BehaviorPrior] = None
         self.final_reasoning = None
         self._client = genai.Client(
             api_key=os.environ.get("GEMINI_API_KEY"),
@@ -115,8 +120,31 @@ class BrowserAgent:
             ],
         )
 
+        # Optionally load behavior prior
+        if self._use_behavior_prior and behavior_prior_path:
+            try:
+                w, h = self._browser_computer.screen_size()
+                self._behavior_prior = BehaviorPrior((w, h))
+                # Prefer loading if checkpoint exists; otherwise it will remain None
+                self._behavior_prior = BehaviorPrior.load(behavior_prior_path)
+                if self._verbose:
+                    termcolor.cprint(
+                        f"Loaded behavior prior from {behavior_prior_path}", color="green"
+                    )
+            except Exception as e:
+                termcolor.cprint(
+                    f"Failed to load behavior prior: {e}. Proceeding without it.", color="yellow"
+                )
+
     def handle_action(self, action: types.FunctionCall) -> FunctionResponseT:
         """Handles the action and returns the environment state."""
+        # If behavior prior is enabled, validate/adjust arguments before execution
+        if self._behavior_prior is not None and action.args is not None:
+            try:
+                adjusted_args = self._behavior_prior.validate_or_adjust(action.name, dict(action.args))
+                action.args.update(adjusted_args)
+            except Exception:
+                pass
         if action.name == "open_web_browser":
             return self._browser_computer.open_web_browser()
         elif action.name == "click_at":
